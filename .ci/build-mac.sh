@@ -28,6 +28,7 @@ export CPPFLAGS="-I$BREW_PATH/llvm@13/include -msse -msse2 -mcx16 -no-pie"
 git submodule update --init --recursive --depth 1
 
 # 3rdparty fixes
+
 sed -i '' "s/extern const double NSAppKitVersionNumber;/const double NSAppKitVersionNumber = 1343;/g" 3rdparty/hidapi/hidapi/mac/hid.c
 
 mkdir build && cd build || exit 1
@@ -43,6 +44,7 @@ cmake .. \
     -G Ninja
 
 ninja; build_status=$?;
+
 
 cd ..
 

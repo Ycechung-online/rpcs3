@@ -52,12 +52,17 @@ struct cfg_root : cfg::node
 		cfg::_enum<tsx_usage> enable_TSX{ this, "Enable TSX", enable_tsx_by_default() ? tsx_usage::enabled : tsx_usage::disabled }; // Enable TSX. Forcing this on Haswell/Broadwell CPUs should be used carefully
 		cfg::_bool spu_accurate_xfloat{ this, "Accurate xfloat", false };
 		cfg::_bool spu_approx_xfloat{ this, "Approximate xfloat", true };
-		cfg::_bool llvm_accurate_dfma{ this, "LLVM Accurate DFMA", true }; // Enable accurate double-precision FMA for CPUs which do not support it natively
-		cfg::_bool llvm_ppu_jm_handling{ this, "PPU LLVM Java Mode Handling", true }; // Respect current Java Mode for alti-vec ops by PPU LLVM
+		cfg::_bool spu_relaxed_xfloat{ this, "Relaxed xfloat", true }; // Approximate accuracy for only the "FCGT" and "FNMS" instructions
 		cfg::_int<-1, 14> ppu_128_reservations_loop_max_length{ this, "Accurate PPU 128-byte Reservation Op Max Length", 0, true }; // -1: Always accurate, 0: Never accurate, 1-14: max accurate loop length
-		cfg::_bool llvm_ppu_accurate_vector_nan{ this, "PPU LLVM Accurate Vector NaN values", false };
 		cfg::_int<-64, 64> stub_ppu_traps{ this, "Stub PPU Traps", 0, true }; // Hack, skip PPU traps for rare cases where the trap is continueable (specify relative instructions to skip)
-		cfg::_bool full_width_avx512{ this, "Full Width AVX-512", false};
+		cfg::_bool full_width_avx512{ this, "Full Width AVX-512", false };
+		cfg::_bool ppu_llvm_nj_fixup{ this, "PPU LLVM Java Mode Handling", true }; // Partially respect current Java Mode for alti-vec ops by PPU LLVM
+		cfg::_bool use_accurate_dfma{ this, "Use Accurate DFMA", true }; // Enable accurate double-precision FMA for CPUs which do not support it natively
+		cfg::_bool ppu_set_sat_bit{ this, "PPU Set Saturation Bit", false }; // Accuracy. If unset, completely disable saturation flag handling.
+		cfg::_bool ppu_use_nj_bit{ this, "PPU Accurate Non-Java Mode", false }; // Accuracy. If set, accurately emulate NJ flag. Implies NJ fixup.
+		cfg::_bool ppu_fix_vnan{ this, "PPU Fixup Vector NaN Values", false }; // Accuracy. Partial.
+		cfg::_bool ppu_set_vnan{ this, "PPU Accurate Vector NaN Values", false }; // Accuracy. Implies ppu_fix_vnan.
+		cfg::_bool ppu_set_fpcc{ this, "PPU Set FPCC Bits", false }; // Accuracy.
 
 		cfg::_bool debug_console_mode{ this, "Debug Console Mode", false }; // Debug console emulation, not recommended
 		cfg::_bool hook_functions{ this, "Hook static functions" };
@@ -69,11 +74,10 @@ struct cfg_root : cfg::node
 		cfg::uint64 tx_limit2_ns{this, "TSX Transaction Second Limit", 2000}; // In nanoseconds
 
 		cfg::_int<10, 3000> clocks_scale{ this, "Clocks scale", 100 }; // Changing this from 100 (percentage) may affect game speed in unexpected ways
-		cfg::_enum<sleep_timers_accuracy_level> sleep_timers_accuracy{ this, "Sleep Timers Accuracy",
-#ifdef __linux__
-			sleep_timers_accuracy_level::_as_host, true };
+#if defined (__linux__) || defined (__APPLE__)
+		cfg::_enum<sleep_timers_accuracy_level> sleep_timers_accuracy{ this, "Sleep Timers Accuracy", sleep_timers_accuracy_level::_as_host, true };
 #else
-			sleep_timers_accuracy_level::_usleep, true };
+		cfg::_enum<sleep_timers_accuracy_level> sleep_timers_accuracy{ this, "Sleep Timers Accuracy", sleep_timers_accuracy_level::_usleep, true };
 #endif
 
 		cfg::uint64 perf_report_threshold{this, "Performance Report Threshold", 500, true}; // In µs, 0.5ms = default, 0 = everything
@@ -130,7 +134,11 @@ struct cfg_root : cfg::node
 		cfg::_bool disable_vulkan_mem_allocator{ this, "Disable Vulkan Memory Allocator", false };
 		cfg::_bool full_rgb_range_output{ this, "Use full RGB output range", true, true }; // Video out dynamic range
 		cfg::_bool strict_texture_flushing{ this, "Strict Texture Flushing", false };
+#ifdef __APPLE__
+		cfg::_bool disable_native_float16{ this, "Disable native float16 support", true };
+#else
 		cfg::_bool disable_native_float16{ this, "Disable native float16 support", false };
+#endif
 		cfg::_bool multithreaded_rsx{ this, "Multithreaded RSX", false };
 		cfg::_bool relaxed_zcull_sync{ this, "Relaxed ZCULL Sync", false };
 		cfg::_bool enable_3d{ this, "Enable 3D", false };
@@ -219,7 +227,7 @@ struct cfg_root : cfg::node
 
 		cfg::_enum<audio_renderer> renderer{ this, "Renderer", audio_renderer::cubeb, true };
 		cfg::_enum<audio_provider> provider{ this, "Audio provider", audio_provider::cell_audio, false };
-		cfg::_bool dump_to_file{ this, "Dump to file" };
+		cfg::_bool dump_to_file{ this, "Dump to file", false, true };
 		cfg::_bool convert_to_s16{ this, "Convert to 16 bit", false, true };
 		cfg::_enum<audio_downmix> audio_channel_downmix{ this, "Audio Channels", audio_downmix::downmix_to_stereo, true };
 		cfg::_int<0, 200> volume{ this, "Master Volume", 100, true };

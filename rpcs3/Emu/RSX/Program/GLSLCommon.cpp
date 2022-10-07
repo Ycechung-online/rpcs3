@@ -510,10 +510,10 @@ namespace glsl
 				OS <<
 				"		else if (srgb_convert)\n"
 				"		{\n"
-				"			" << reg0 << ".rgb = clamp16(linear_to_srgb(" << reg0 << ")).rgb;\n"
-				"			" << reg1 << ".rgb = clamp16(linear_to_srgb(" << reg1 << ")).rgb;\n"
-				"			" << reg2 << ".rgb = clamp16(linear_to_srgb(" << reg2 << ")).rgb;\n"
-				"			" << reg3 << ".rgb = clamp16(linear_to_srgb(" << reg3 << ")).rgb;\n"
+				"			" << reg0 << " = round_to_8bit(f16vec4(linear_to_srgb(" << reg0 << ").rgb, " << reg0 << ".a));\n"
+				"			" << reg1 << " = round_to_8bit(f16vec4(linear_to_srgb(" << reg1 << ").rgb, " << reg1 << ".a));\n"
+				"			" << reg2 << " = round_to_8bit(f16vec4(linear_to_srgb(" << reg2 << ").rgb, " << reg2 << ".a));\n"
+				"			" << reg3 << " = round_to_8bit(f16vec4(linear_to_srgb(" << reg3 << ").rgb, " << reg3 << ".a));\n"
 				"		}\n";
 			}
 			else
@@ -521,10 +521,10 @@ namespace glsl
 				OS <<
 				"		else if (srgb_convert)\n"
 				"		{\n"
-				"			" << reg0 << ".rgb = linear_to_srgb(" << reg0 << ").rgb;\n"
-				"			" << reg1 << ".rgb = linear_to_srgb(" << reg1 << ").rgb;\n"
-				"			" << reg2 << ".rgb = linear_to_srgb(" << reg2 << ").rgb;\n"
-				"			" << reg3 << ".rgb = linear_to_srgb(" << reg3 << ").rgb;\n"
+				"			" << reg0 << " = round_to_8bit(vec4(linear_to_srgb(" << reg0 << ").rgb, " << reg0 << ".a));\n"
+				"			" << reg1 << " = round_to_8bit(vec4(linear_to_srgb(" << reg1 << ").rgb, " << reg1 << ".a));\n"
+				"			" << reg2 << " = round_to_8bit(vec4(linear_to_srgb(" << reg2 << ").rgb, " << reg2 << ".a));\n"
+				"			" << reg3 << " = round_to_8bit(vec4(linear_to_srgb(" << reg3 << ").rgb, " << reg3 << ".a));\n"
 				"		}\n";
 			}
 		}
@@ -559,6 +559,21 @@ namespace glsl
 			else
 			{
 				OS << "#define _kill() discard\n\n";
+			}
+
+			if (!props.fp32_outputs)
+			{
+				OS << "// Workaround broken output rounding behavior\n";
+				if (props.srgb_output_rounding)
+				{
+					const auto _255 = (props.supports_native_fp16) ? "f16vec4(255.)" : "vec4(255.)";
+					const auto _1_over_2 = (props.supports_native_fp16) ? "f16vec4(0.5)" : "vec4(0.5)";
+					OS << "#define round_to_8bit(v4) (floor(fma(v4, " << _255 << ", " << _1_over_2 << ")) / " << _255 << ")\n\n";
+				}
+				else
+				{
+					OS << "#define round_to_8bit(v4) (v4)\n\n";
+				}
 			}
 
 			if (props.require_texture_ops)
@@ -755,26 +770,9 @@ namespace glsl
 		{
 			OS <<
 
-#ifdef __APPLE__
-			"vec4 remap_vector_m(const in vec4 rgba, const in uint remap_bits)\n"
-			"{\n"
-			"	uvec4 selector = (uvec4(remap_bits) >> uvec4(3, 6, 9, 0)) & 0x7;\n"
-			"	bvec4 choice = greaterThan(selector, uvec4(1));\n"
-			"\n"
-			"	vec4 direct = vec4(selector);\n"
-			"	selector = min(selector - 2, selector);\n"
-			"	vec4 indexed = vec4(rgba[selector.r], rgba[selector.g], rgba[selector.b], rgba[selector.a]);\n"
-			"	return mix(direct, indexed, choice);\n"
-			"}\n\n"
-#endif
-
 			//TODO: Move all the texture read control operations here
 			"vec4 process_texel(in vec4 rgba, const in uint control_bits)\n"
 			"{\n"
-#ifdef __APPLE__
-			"	uint remap_bits = (control_bits >> 16) & 0xFFFF;\n"
-			"	if (remap_bits != 0x8D5) rgba = remap_vector_m(rgba, remap_bits);\n\n"
-#endif
 			"	if (control_bits == 0)\n"
 			"	{\n"
 			"		return rgba;\n"

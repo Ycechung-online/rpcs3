@@ -20,6 +20,7 @@
 #include "VKShaderInterpreter.h"
 #include "VKQueryPool.h"
 #include "../GCM.h"
+#include "util/asm.hpp"
 
 #include <thread>
 #include <optional>
@@ -310,11 +311,7 @@ namespace vk
 		{
 			while (num_waiters.load() != 0)
 			{
-#ifdef _MSC_VER
-				_mm_pause();
-#else
-				__builtin_ia32_pause();
-#endif
+				utils::pause();
 			}
 		}
 
@@ -334,6 +331,11 @@ namespace vk
 		u32 width;
 		u32 height;
 		u32 pitch;
+	};
+
+	struct draw_call_t
+	{
+		u32 subdraw_id;
 	};
 }
 
@@ -486,7 +488,7 @@ private:
 	utils::address_range m_offloader_fault_range;
 	rsx::invalidation_cause m_offloader_fault_cause;
 
-	u32 m_current_subdraw_id = 0;
+	vk::draw_call_t m_current_draw = {};
 	u64 m_current_renderpass_key = 0;
 	VkRenderPass m_cached_renderpass = VK_NULL_HANDLE;
 	std::vector<vk::image*> m_fbo_images;

@@ -35,6 +35,7 @@
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QSound>
+#include <QMessageBox>
 
 #include <clocale>
 
@@ -103,6 +104,17 @@ bool gui_application::Init()
 	{
 		welcome_dialog* welcome = new welcome_dialog(m_gui_settings);
 		welcome->exec();
+	}
+
+	// Check maxfiles
+	if (utils::get_maxfiles() < 4096)
+	{
+		QMessageBox::warning(nullptr,
+							 tr("Warning"),
+							 tr("The current limit of maximum file descriptors is too low.\n"
+								"Some games will crash.\n"
+								"\n"
+								"Please increase the limit before running RPCS3."));
 	}
 
 	if (m_main_window && !m_main_window->Init(m_with_cli_boot))
@@ -250,7 +262,7 @@ void gui_application::InitializeConnects()
 #endif
 
 	qRegisterMetaType<std::function<void()>>("std::function<void()>");
-	connect(this, &gui_application::RequestCallAfter, this, &gui_application::HandleCallAfter);
+	connect(this, &gui_application::RequestCallFromMainThread, this, &gui_application::CallFromMainThread);
 }
 
 std::unique_ptr<gs_frame> gui_application::get_gs_frame()
@@ -318,9 +330,9 @@ void gui_application::InitializeCallbacks()
 
 		return false;
 	};
-	callbacks.call_after = [this](std::function<void()> func)
+	callbacks.call_from_main_thread = [this](std::function<void()> func)
 	{
-		RequestCallAfter(std::move(func));
+		RequestCallFromMainThread(std::move(func));
 	};
 
 	callbacks.init_gs_render = []()
@@ -412,7 +424,7 @@ void gui_application::InitializeCallbacks()
 
 	callbacks.play_sound = [](const std::string& path)
 	{
-		Emu.CallAfter([path]()
+		Emu.CallFromMainThread([path]()
 		{
 			if (fs::is_file(path))
 			{
@@ -602,7 +614,7 @@ void gui_application::OnEmuSettingsChange()
 /**
  * Using connects avoids timers being unable to be used in a non-qt thread. So, even if this looks stupid to just call func, it's succinct.
  */
-void gui_application::HandleCallAfter(const std::function<void()>& func)
+void gui_application::CallFromMainThread(const std::function<void()>& func)
 {
 	func();
 }

@@ -5,29 +5,37 @@
 
 #include "util/to_endian.hpp"
 #include "util/sysinfo.hpp"
+#include "Utilities/JIT.h"
 #include "util/asm.hpp"
 
+#if defined(ARCH_X64)
 #include "emmintrin.h"
 #include "immintrin.h"
+#endif
 
-#if !defined(_MSC_VER) && defined(__clang__)
+#if !defined(_MSC_VER)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #endif
 
-#if defined(_MSC_VER)
+#ifdef ARCH_ARM64
+#if !defined(_MSC_VER)
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#endif
+#undef FORCE_INLINE
+#include "Emu/CPU/sse2neon.h"
+#endif
+
+#if defined(_MSC_VER) || !defined(__SSE2__)
 #define PLAIN_FUNC
-#define SSSE3_FUNC
 #define SSE4_1_FUNC
 #define AVX2_FUNC
 #define AVX3_FUNC
 #else
 #ifndef __clang__
 #define PLAIN_FUNC __attribute__((optimize("no-tree-vectorize")))
-#define SSSE3_FUNC __attribute__((__target__("ssse3"))) __attribute__((optimize("tree-vectorize")))
 #else
 #define PLAIN_FUNC
-#define SSSE3_FUNC __attribute__((__target__("ssse3")))
 #endif
 #define SSE4_1_FUNC __attribute__((__target__("sse4.1")))
 #define AVX2_FUNC __attribute__((__target__("avx2")))
@@ -57,7 +65,7 @@ constexpr bool s_use_ssse3 = true;
 constexpr bool s_use_sse4_1 = true;
 constexpr bool s_use_avx2 = true;
 constexpr bool s_use_avx3 = false;
-#elif defined(__SSE41__)
+#elif defined(__SSE4_1__)
 constexpr bool s_use_ssse3 = true;
 constexpr bool s_use_sse4_1 = true;
 constexpr bool s_use_avx2 = false;
@@ -67,11 +75,16 @@ constexpr bool s_use_ssse3 = true;
 constexpr bool s_use_sse4_1 = false;
 constexpr bool s_use_avx2 = false;
 constexpr bool s_use_avx3 = false;
-#else
+#elif defined(ARCH_X64)
 const bool s_use_ssse3 = utils::has_ssse3();
 const bool s_use_sse4_1 = utils::has_sse41();
 const bool s_use_avx2 = utils::has_avx2();
 const bool s_use_avx3 = utils::has_avx512();
+#else
+constexpr bool s_use_ssse3 = true; // Non x86
+constexpr bool s_use_sse4_1 = true; // Non x86
+constexpr bool s_use_avx2 = false;
+constexpr bool s_use_avx3 = false;
 #endif
 
 const __m128i s_bswap_u32_mask = _mm_set_epi8(
@@ -98,7 +111,7 @@ namespace utils
 namespace
 {
 	template <bool Compare>
-	PLAIN_FUNC bool copy_data_swap_u32_naive(u32* dst, const u32* src, u32 count)
+	PLAIN_FUNC auto copy_data_swap_u32_naive(u32* dst, const u32* src, u32 count)
 	{
 		u32 result = 0;
 
@@ -117,120 +130,114 @@ namespace
 			dst[i] = data;
 		}
 
-		return static_cast<bool>(result);
-	}
-
-	template <bool Compare>
-	SSSE3_FUNC bool copy_data_swap_u32_ssse3(u32* dst, const u32* src, u32 count)
-	{
-		u32 result = 0;
-
-#ifdef __clang__
-		#pragma clang loop vectorize(enable) interleave(disable) unroll(disable)
-#endif
-		for (u32 i = 0; i < count; i++)
+		if constexpr (Compare)
 		{
-			const u32 data = stx::se_storage<u32>::swap(src[i]);
-
-			if constexpr (Compare)
-			{
-				result |= data ^ dst[i];
-			}
-
-			dst[i] = data;
+			return static_cast<bool>(result);
 		}
-
-		return static_cast<bool>(result);
 	}
 
-	template <bool Compare, int Size, typename RT>
-	void build_copy_data_swap_u32_avx3(asmjit::x86::Assembler& c, std::array<asmjit::x86::Gp, 4>& args, const RT& rmask, const RT& rload, const RT& rtest)
+#if defined(ARCH_X64)
+	template <bool Compare, uint Size, bool Avx = true>
+	void build_copy_data_swap_u32_avx3(native_asm& c, native_args& args)
 	{
 		using namespace asmjit;
 
-		Label loop = c.newLabel();
-		Label tail = c.newLabel();
+		native_vec_t<Size> vdata{0};
+		native_vec_t<Size> vmask{1};
+		native_vec_t<Size> vcmp{2};
 
-		// Get start alignment offset
-		c.mov(args[3].r32(), args[0].r32());
-		c.and_(args[3].r32(), Size * 4 - 1);
+		// Load and broadcast shuffle mask
+		if constexpr (!Avx)
+			c.movaps(vmask, x86::oword_ptr(uptr(&s_bswap_u32_mask)));
+		if constexpr (Size == 16 && Avx)
+			c.vmovaps(vmask, x86::oword_ptr(uptr(&s_bswap_u32_mask)));
+		if constexpr (Size >= 32)
+			c.vbroadcasti32x4(vmask, x86::oword_ptr(uptr(&s_bswap_u32_mask)));
 
-		// Load and duplicate shuffle mask
-		c.vbroadcasti32x4(rmask, x86::oword_ptr(uptr(&s_bswap_u32_mask)));
-		if (Compare)
-			c.vpxor(x86::xmm2, x86::xmm2, x86::xmm2);
+		// Clear vcmp (bitwise inequality accumulator)
+		if constexpr (Compare && Avx)
+			c.vxorps(x86::xmm2, x86::xmm2, x86::xmm2);
+		if constexpr (Compare && !Avx)
+			c.xorps(x86::xmm2, x86::xmm2);
+		c.mov(args[3].r32(), -1);
+		c.xor_(x86::eax, x86::eax);
 
-		c.or_(x86::eax, -1);
-		// Small data: skip to tail (ignore alignment)
-		c.cmp(args[2].r32(), Size);
-		c.jbe(tail);
-
-		// Generate mask for first iteration, adjust args using alignment offset
-		c.sub(args[1], args[3]);
-		c.shr(args[3].r32(), 2);
-		c.shlx(x86::eax, x86::eax, args[3].r32());
-		c.kmovw(x86::k1, x86::eax);
-		c.and_(args[0], -Size * 4);
-		c.add(args[2].r32(), args[3].r32());
-
-		c.k(x86::k1).z().vmovdqu32(rload, x86::Mem(args[1], 0, Size * 4u));
-		c.vpshufb(rload, rload, rmask);
-		if (Compare)
-			c.k(x86::k1).z().vpxord(rtest, rload, x86::Mem(args[0], 0, Size * 4u));
-		c.k(x86::k1).vmovdqa32(x86::Mem(args[0], 0, Size * 4u), rload);
-		c.lea(args[0], x86::qword_ptr(args[0], Size * 4));
-		c.lea(args[1], x86::qword_ptr(args[1], Size * 4));
-		c.sub(args[2].r32(), Size);
-
-		c.or_(x86::eax, -1);
-		c.align(AlignMode::kCode, 16);
-
-		c.bind(loop);
-		c.cmp(args[2].r32(), Size);
-		c.jbe(tail);
-		c.vmovdqu32(rload, x86::Mem(args[1], 0, Size * 4u));
-		c.vpshufb(rload, rload, rmask);
-		if (Compare)
-			c.vpternlogd(rtest, rload, x86::Mem(args[0], 0, Size * 4u), 0xf6); // orAxorBC
-		c.vmovdqa32(x86::Mem(args[0], 0, Size * 4u), rload);
-		c.lea(args[0], x86::qword_ptr(args[0], Size * 4));
-		c.lea(args[1], x86::qword_ptr(args[1], Size * 4));
-		c.sub(args[2].r32(), Size);
-		c.jmp(loop);
-
-		c.bind(tail);
-		c.shlx(x86::eax, x86::eax, args[2].r32());
-		c.not_(x86::eax);
-		c.kmovw(x86::k1, x86::eax);
-		c.k(x86::k1).z().vmovdqu32(rload, x86::Mem(args[1], 0, Size * 4u));
-		c.vpshufb(rload, rload, rmask);
-		if (Compare)
-			c.k(x86::k1).vpternlogd(rtest, rload, x86::Mem(args[0], 0, Size * 4u), 0xf6);
-		c.k(x86::k1).vmovdqu32(x86::Mem(args[0], 0, Size * 4u), rload);
-
-		if (Compare)
+		build_incomplete_loop(c, x86::eax, args[2].r32(), Size / 4, [&]
 		{
-			if constexpr (Size != 16)
+			if constexpr (Avx)
 			{
-				c.vptest(rtest, rtest);
+				c.vmovdqu32(vdata, x86::ptr(args[1], x86::rax, 2, 0, Size));
+				c.vpshufb(vdata, vdata, vmask);
+				if constexpr (Compare)
+					c.vpternlogd(vcmp, vdata, x86::ptr(args[0], x86::rax, 2, 0, Size), 0xf6); // orAxorBC
+				c.vmovdqu32(x86::ptr(args[0], x86::rax, 2, 0, Size), vdata);
 			}
 			else
 			{
-				c.vptestmd(x86::k1, rtest, rtest);
+				c.movdqu(vdata, x86::oword_ptr(args[1], x86::rax, 2, 0));
+				c.pshufb(vdata, vmask);
+				if constexpr (Compare)
+				{
+					c.movups(x86::xmm3, x86::oword_ptr(args[0], x86::rax, 2, 0));
+					c.xorps(x86::xmm3, vdata);
+					c.orps(vcmp, x86::xmm3);
+				}
+				c.movups(x86::oword_ptr(args[0], x86::rax, 2, 0), vdata);
+			}
+		});
+
+		if constexpr (Avx)
+		{
+			c.bzhi(args[3].r32(), args[3].r32(), args[2].r32());
+			c.kmovw(x86::k1, args[3].r32());
+			c.k(x86::k1).z().vmovdqu32(vdata, x86::ptr(args[1], x86::rax, 2, 0, Size));
+			c.vpshufb(vdata, vdata, vmask);
+			if constexpr (Compare)
+				c.k(x86::k1).vpternlogd(vcmp, vdata, x86::ptr(args[0], x86::rax, 2, 0, Size), 0xf6);
+			c.k(x86::k1).vmovdqu32(x86::ptr(args[0], x86::rax, 2, 0, Size), vdata);
+		}
+		else
+		{
+			build_loop(c, x86::eax, args[2].r32(), [&]
+			{
+				c.movd(vdata, x86::dword_ptr(args[1], x86::rax, 2, 0));
+				c.pshufb(vdata, vmask);
+				if constexpr (Compare)
+				{
+					c.movd(x86::xmm3, x86::dword_ptr(args[0], x86::rax, 2, 0));
+					c.pxor(x86::xmm3, vdata);
+					c.por(vcmp, x86::xmm3);
+				}
+				c.movd(x86::dword_ptr(args[0], x86::rax, 2, 0), vdata);
+			});
+		}
+
+		if (Compare)
+		{
+			if constexpr (!Avx)
+			{
+				c.ptest(vcmp, vcmp);
+			}
+			else if constexpr (Size != 64)
+			{
+				c.vptest(vcmp, vcmp);
+			}
+			else
+			{
+				c.vptestmd(x86::k1, vcmp, vcmp);
 				c.ktestw(x86::k1, x86::k1);
 			}
 
 			c.setnz(x86::al);
 		}
 
-#ifndef __AVX__
-		c.vzeroupper();
-#endif
+		if constexpr (Avx)
+			c.vzeroupper();
 		c.ret();
 	}
 
 	template <bool Compare>
-	void build_copy_data_swap_u32(asmjit::x86::Assembler& c, std::array<asmjit::x86::Gp, 4>& args)
+	void build_copy_data_swap_u32(native_asm& c, native_args& args)
 	{
 		using namespace asmjit;
 
@@ -238,27 +245,34 @@ namespace
 		{
 			if (utils::has_avx512_icl())
 			{
-				build_copy_data_swap_u32_avx3<Compare, 16>(c, args, x86::zmm0, x86::zmm1, x86::zmm2);
+				build_copy_data_swap_u32_avx3<Compare, 64>(c, args);
 				return;
 			}
 
-			build_copy_data_swap_u32_avx3<Compare, 8>(c, args, x86::ymm0, x86::ymm1, x86::ymm2);
+			build_copy_data_swap_u32_avx3<Compare, 32>(c, args);
 			return;
 		}
 
-		if (utils::has_ssse3())
+		if (utils::has_sse41())
 		{
-			c.jmp(asmjit::imm_ptr(&copy_data_swap_u32_ssse3<Compare>));
+			build_copy_data_swap_u32_avx3<Compare, 16, false>(c, args);
 			return;
 		}
 
-		c.jmp(asmjit::imm_ptr(&copy_data_swap_u32_naive<Compare>));
+		c.jmp(&copy_data_swap_u32_naive<Compare>);
 	}
+#elif defined(ARCH_ARM64)
+	template <bool Compare>
+	void build_copy_data_swap_u32(native_asm& c, native_args& args)
+	{
+		c.b(&copy_data_swap_u32_naive<Compare>);
+	}
+#endif
 }
 
-built_function<void(*)(void*, const void*, u32)> copy_data_swap_u32("copy_data_swap_u32", &build_copy_data_swap_u32<false>);
+DECLARE(copy_data_swap_u32) = build_function_asm<void(*)(u32*, const u32*, u32)>("copy_data_swap_u32", &build_copy_data_swap_u32<false>);
 
-built_function<bool(*)(void*, const void*, u32)> copy_data_swap_u32_cmp("copy_data_swap_u32_cmp", &build_copy_data_swap_u32<true>);
+DECLARE(copy_data_swap_u32_cmp) = build_function_asm<bool(*)(u32*, const u32*, u32)>("copy_data_swap_u32_cmp", &build_copy_data_swap_u32<true>);
 
 namespace
 {
@@ -390,6 +404,7 @@ namespace
 
 	struct primitive_restart_impl
 	{
+#if defined(ARCH_X64)
 		AVX2_FUNC
 		static
 		std::tuple<u16, u16> upload_u16_swapped_avx2(const void *src, void *dst, u32 iterations, u16 restart_index)
@@ -428,6 +443,7 @@ namespace
 
 			return std::make_tuple(min_index, max_index);
 		}
+#endif
 
 		SSE4_1_FUNC
 		static
@@ -512,9 +528,11 @@ namespace
 				{
 					if (s_use_avx2)
 					{
+#if defined(ARCH_X64)
 						u32 iterations = length >> 4;
 						written = length & ~0xF;
 						std::tie(min_index, max_index) = upload_u16_swapped_avx2(src.data(), dst.data(), iterations, restart_index);
+#endif
 					}
 					else if (s_use_sse4_1)
 					{

@@ -27,7 +27,7 @@
 #ifdef __NR_memfd_create
 #elif __x86_64__
 #define __NR_memfd_create 319
-#elif __aarch64__
+#elif ARCH_ARM64
 #define __NR_memfd_create 279
 #endif
 
@@ -293,6 +293,23 @@ namespace utils
 		return ::VirtualLock(pointer, size);
 #else
 		return !::mlock(pointer, size);
+#endif
+	}
+
+	void* memory_map_fd(native_handle fd, usz size, protection prot)
+	{
+#ifdef _WIN32
+		// TODO
+		return nullptr;
+#else
+		const auto result = ::mmap(nullptr, size, +prot, MAP_SHARED, fd, 0);
+
+		if (result == reinterpret_cast<void*>(uptr{umax}))
+		{
+			[[unlikely]] return nullptr;
+		}
+
+		return result;
 #endif
 	}
 

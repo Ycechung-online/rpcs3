@@ -30,7 +30,7 @@ public:
 		const QString read_depth                   = tr("Initializes render target memory using vm memory.");
 		const QString dump_depth                   = tr("Writes depth buffer values to vm memory.");
 		const QString disable_on_disk_shader_cache = tr("Disables the loading and saving of shaders from and to the shader cache in the data directory.");
-		const QString zcull_operation_mode         = tr("Changes ZCULL report synchronization behaviour. Use with caution.\n· Precise is the most accurate to PS3 behaviour.\n· Approximate is just a faster way to generate occlusion data which may not always match what the PS3 would generate.\n· Relaxed changes the synchronization method completely and can improve performance in some games or completely break others.");
+		const QString zcull_operation_mode         = tr("Changes ZCULL report synchronization behaviour. Experiment to find the best option for your game. Approximate mode is recommended for most games.\n· Precise is the most accurate to PS3 behaviour. Required for accurate visuals in some titles such as Demon's Souls and The Darkness.\n· Approximate is a much faster way to generate occlusion data which may not always match what the PS3 would generate. Works well with most PS3 games.\n· Relaxed changes the synchronization method completely and can greatly improve performance in some games or completely break others.");
 		const QString max_spurs_threads            = tr("Limits the maximum number of SPURS threads in each thread group.\nMay improve performance in some cases, especially on systems with limited number of hardware threads.\nLimiting the number of threads is likely to cause crashes; it's recommended to keep this at the default value.");
 		const QString sleep_timers_accuracy        = tr("Changes the sleep period accuracy.\n'As Host' uses default accuracy of the underlying operating system, while 'All Timers' attempts to improve it.\n'Usleep Only' limits the adjustments to usleep syscall only.\nCan affect performance in unexpected ways.");
 		const QString vblank_rate                  = tr("Adjusts the frequency of vertical blanking signals that the emulator sends.\nAffects timing of events which rely on these signals.");
@@ -42,7 +42,7 @@ public:
 		// audio
 
 		const QString audio_out                 = tr("Cubeb uses a cross-platform approach and supports audio buffering, so it is the recommended option.\nXAudio2 uses native Windows sounds system, is the next best alternative.");
-		const QString audio_out_linux           = tr("Cubeb uses a cross-platform approach and supports audio buffering, so it is the recommended option.\nIf it's not availiable, FAudio could be used instead.");
+		const QString audio_out_linux           = tr("Cubeb uses a cross-platform approach and supports audio buffering, so it is the recommended option.\nIf it's not available, FAudio could be used instead.");
 		const QString audio_dump                = tr("Saves all audio as a raw wave file. If unsure, leave this unchecked.");
 		const QString convert                   = tr("Uses 16-bit audio samples instead of default 32-bit floating point.\nUse with buggy audio drivers if you have no sound or completely broken sound.");
 		const QString downmix                   = tr("Uses chosen audio output instead of default 7.1 surround sound.\nUse downmix to stereo with stereo audio devices. Use 5.1 or higher only if you are using a surround sound audio system.");
@@ -55,21 +55,29 @@ public:
 
 		// cpu
 
-		const QString ppu_precise               = tr("Interprets PPU code with absolute accuracy.\nThis is the most accurate Interpreter, but very slow to play games with.\nYou may try this as a last resort if you encounter odd bugs or crashes.\nIf unsure, use PPU Interpreter Fast or PPU Recompiler (LLVM).");
-		const QString ppu_fast                  = tr("Interprets PPU code with sacrificed accuracy in order to achieve better performance.\nThis is the fastest interpreter.\nIt very rarely breaks games even in comparison to the Precise option.\nTry this if PPU Recompiler (LLVM) fails.");
+		const QString ppu__static               = tr("Interpreter (slow). Try this if PPU Recompiler (LLVM) doesn't work.");
+		const QString ppu_dynamic               = tr("Alternative interpreter (slow). May be faster than static interpreter. Try this if PPU Recompiler (LLVM) doesn't work.");
 		const QString ppu_llvm                  = tr("Recompiles and caches the game's PPU code using the LLVM Recompiler once before running it for the first time.\nThis is by far the fastest option and should always be used.\nShould you face compatibility issues, fall back to one of the Interpreters and retry.\nIf unsure, use this option.");
 		const QString ppu_precompilation        = tr("Searches the game's directory and precompiles extra PPU modules during boot.\nIf disabled, these modules will only be compiled when needed. Depending on the game, this might interrupt the gameplay unexpectedly and possibly frequently.\nOnly disable this if you want to get ingame more quickly.");
-		const QString spu_precise               = tr("Interprets SPU code with absolute accuracy.\nThis is extremely slow but may fix broken graphics in some games.");
-		const QString spu_fast                  = tr("Interprets SPU code with sacrificed accuracy in order to achieve better performance.\nThis is slower than the SPU Recompiler but significantly faster than the precise interpreter.\nHowever, games rarely need this.");
+		const QString spu__static               = tr("Interpreter (slow). Try this if SPU Recompiler (LLVM) doesn't work.");
+		const QString spu_dynamic               = tr("Alternative interpreter (slow). May be faster than static interpreter. Try this if SPU Recompiler (LLVM) doesn't work.");
 		const QString spu_asmjit                = tr("Recompiles the game's SPU code using the ASMJIT Recompiler.\nThis is the fast option with very good compatibility.\nIf unsure, use this option.");
 		const QString spu_llvm                  = tr("Recompiles and caches the game's SPU code using the LLVM Recompiler before running which adds extra start-up time.\nThis is the fastest option with very good compatibility.\nIf you experience issues, use the ASMJIT Recompiler.");
-		const QString accurate_xfloat           = tr("Adds extra accuracy to SPU float vectors processing.\nFixes bugs in various games at the cost of performance.\nThis setting is only applied when SPU Decoder is set to Fast or LLVM.");
+		const QString accurate_xfloat           = tr("Adds extra accuracy to SPU float vectors processing.\nFixes bugs in various games at the cost of performance.\nThis setting is only applied when SPU Decoder is set to Dynamic or LLVM.");
+		const QString approximate_xfloat        = tr("Default accuracy for SPU float vectors processing.\nFixes bugs in various games at the cost of performance.\nThis setting is only applied when SPU Decoder is set to Dynamic or LLVM.");
 		const QString enable_thread_scheduler   = tr("Control how RPCS3 utilizes the threads of your system.\nEach option heavily depends on the game and on your CPU. It's recommended to try each option to find out which performs the best.\nChanging the thread scheduler is not supported on CPUs with less than 12 threads.");
 		const QString spu_loop_detection        = tr("Try to detect loop conditions in SPU kernels and use them as scheduling hints.\nImproves performance and reduces CPU usage.\nMay cause severe audio stuttering in rare cases.");
 		const QString enable_tsx                = tr("Enable usage of TSX instructions.\nNeeds to be forced on some Haswell or Broadwell CPUs or CPUs with the TSX-FA instruction set.\nForcing TSX in these cases may lead to system and performance instability, use it with caution.");
 		const QString spu_block_size            = tr("This option controls the SPU analyser, particularly the size of compiled units. The Mega and Giga modes may improve performance by tying smaller units together, decreasing the number of compiled units but increasing their size.\nUse the Safe mode for maximum compatibility.");
 		const QString preferred_spu_threads     = tr("Some SPU stages are sensitive to race conditions and allowing a limited number at a time helps alleviate performance stalls.\nSetting this to a smaller value might improve performance and reduce stuttering in some games.\nLeave this on auto if performance is negatively affected when setting a small value.");
 		const QString full_width_avx512         = tr("Enables the use of code with full width AVX-512.\nThis code can be executed much faster, but may cause a loss in performance if your CPU model experiences downclocking on wide AVX-512 loads.\nNote that AVX-512 instructions will be used regardless of this option, just at 128 and 256 bit width.");
+		const QString fixup_ppunj               = tr("Legacy option. Fixup result vector values in Non-Java Mode in PPU LLVM.\nIf unsure, do not modify this setting.");
+		const QString accurate_dfma             = tr("Use accurate double-precision FMA instructions in PPU and SPU backends.\nWhile disabling it might give a decent performance boost if your CPU doesn't support FMA, it may also introduce subtle bugs that otherwise do not occur.\nYou shouldn't disable it if your CPU supports FMA.");
+		const QString accurate_ppusat           = tr("Accurately set Saturation Bit values in PPU backends.\nIf unsure, do not modify this setting.");
+		const QString accurate_ppunj            = tr("Respect Non-Java Mode Bit values for vector ops in PPU backends.\nIf unsure, do not modify this setting.");
+		const QString fixup_ppuvnan             = tr("Fixup NaN results in vector instructions in PPU backends.\nIf unsure, do not modify this setting.");
+		const QString accurate_ppuvnan          = tr("Accurately set NaN results in vector instructions in PPU backends.\nIf unsure, do not modify this setting.");
+		const QString accurate_ppufpcc          = tr("Accurately set FPCC Bits in PPU backends.\nIf unsure, do not modify this setting.");
 
 		// debug
 
@@ -80,8 +88,6 @@ public:
 		const QString accurate_getllar             = tr("Accurately processes SPU MFC_GETLLAR operation.");
 		const QString accurate_spu_dma             = tr("Accurately processes SPU DMA operations.");
 		const QString accurate_cache_line_stores   = tr("Accurately processes PPU DCBZ instruction.\nIn addition, when combined with Accurate SPU DMA, SPU PUT cache line accesses will be processed atomically.");
-		const QString accurate_llvm_dfma           = tr("Provides extra accuracy on FMA instructions at the cost of performance.\nWhile disabling it might give a decent performance boost if your CPU doesn't support FMA, it may also introduce subtle bugs that otherwise do not occur.\nYou can't disable it if your CPU supports FMA.");
-		const QString accurate_vector_nan          = tr("Forces the floating point NaN (Not A Number) values outputted from PPU vector instructions to be accurate to the real hardware. (0x7FC00000)");
 		const QString accurate_rsx_access          = tr("Forces RSX pauses on SPU MFC_GETLLAR and SPU MFC_PUTLLUC operations.");
 		const QString mfc_delay_command            = tr("Forces delaying any odd MFC command, waits for at least 2 pending commands to execute them in a random order.\nMust be used with either SPU interpreters currently.\nSeverely degrades performance! If unsure, don't use this option.");
 		const QString hook_static_functions        = tr("Allows to hook some functions like 'memcpy' replacing them with high-level implementations. May do nothing or break things. Experimental.");
@@ -101,7 +107,6 @@ public:
 		const QString accurate_ppu_128_loop        = tr("When enabled, PPU atomic operations will operate on entire cache line data, as opposed to a single 64bit block of memory when disabled.\nNumerical values control whether or not to enable the accurate version based on the atomic operation's length.");
 		const QString enable_performance_report    = tr("Measure certain events and print a chart after the emulator is stopped. Don't enable if not asked to.");
 		const QString num_ppu_threads              = tr("Affects maximum amount of PPU threads running concurrently, the value of 1 has very low compatibility with games.\n2 is the default, if unsure do not modify this setting.");
-		const QString ppu_llvm_java_mode_handling  = tr("Respect current Java Mode for alti-vec ops by PPU LLVM.\nIf unsure, do not modify this setting.");
 
 		// emulator
 

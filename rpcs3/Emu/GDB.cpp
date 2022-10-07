@@ -15,6 +15,10 @@
 #include <WS2tcpip.h>
 #include <afunix.h> // sockaddr_un
 #else
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#endif
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -25,6 +29,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/un.h> // sockaddr_un
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
 #endif
 
 #include <charconv>
@@ -712,7 +719,7 @@ bool gdb_thread::cmd_attached_to_what(gdb_cmd&)
 bool gdb_thread::cmd_kill(gdb_cmd&)
 {
 	GDB.notice("Kill command issued");
-	Emu.Stop();
+	Emu.CallFromMainThread([](){ Emu.GracefulShutdown(); });
 	return true;
 }
 

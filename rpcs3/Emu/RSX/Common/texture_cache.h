@@ -223,21 +223,29 @@ namespace rsx
 			// Returns true if at least threshold% is covered in pixels
 			bool atlas_covers_target_area(int threshold) const
 			{
-				if (external_subresource_desc.op != deferred_request_command::atlas_gather)
-					return true;
-
-				const int target_area = (external_subresource_desc.width * external_subresource_desc.height * threshold) / 100;
+				const int target_area = (external_subresource_desc.width * external_subresource_desc.height * external_subresource_desc.depth * threshold) / 100;
 				int covered_area = 0;
 				areai bbox{smax, smax, 0, 0};
 
 				for (const auto& section : external_subresource_desc.sections_to_copy)
 				{
+					if (section.level != 0)
+					{
+						// Ignore other slices other than mip0
+						continue;
+					}
+
+					// Calculate virtual Y coordinate
+					const auto dst_y = (section.dst_z * external_subresource_desc.height) + section.dst_y;
+
+					// Add this slice's dimensions to the total
 					covered_area += section.dst_w * section.dst_h;
 
+					// Extend the covered bbox
 					bbox.x1 = std::min<int>(section.dst_x, bbox.x1);
 					bbox.x2 = std::max<int>(section.dst_x + section.dst_w, bbox.x2);
-					bbox.y1 = std::min<int>(section.dst_y, bbox.y1);
-					bbox.y2 = std::max<int>(section.dst_y + section.dst_h, bbox.y2);
+					bbox.y1 = std::min<int>(dst_y, bbox.y1);
+					bbox.y2 = std::max<int>(dst_y + section.dst_h, bbox.y2);
 				}
 
 				if (covered_area < target_area)
@@ -1013,6 +1021,12 @@ namespace rsx
 
 		virtual void on_frame_end()
 		{
+			// Must manually release each cached entry
+			for (auto& entry : m_temporary_subresource_cache)
+			{
+				release_temporary_subresource(entry.second.second);
+			}
+
 			m_temporary_subresource_cache.clear();
 			m_predictor.on_frame_end();
 			reset_frame_statistics();
@@ -1861,8 +1875,8 @@ namespace rsx
 					if (const auto section_count = result.external_subresource_desc.sections_to_copy.size();
 						section_count > 0)
 					{
-						bool result_is_valid = result.atlas_covers_target_area(section_count == 1 ? 99 : 90);
-						if (!result_is_valid && _pool == 0 && !g_cfg.video.write_color_buffers && !g_cfg.video.write_depth_buffer)
+						bool result_is_valid;
+						if (_pool == 0 && !g_cfg.video.write_color_buffers && !g_cfg.video.write_depth_buffer)
 						{
 							// HACK: Avoid WCB requirement for some games with wrongly declared sampler dimensions.
 							// TODO: Some games may render a small region (e.g 1024x256x2) and sample a huge texture (e.g 1024x1024).
@@ -1870,6 +1884,10 @@ namespace rsx
 							// Properly fix this by introducing partial data upload into the surface cache in such cases and making RCB/RDB
 							// enabled by default. Blit engine already handles this correctly.
 							result_is_valid = true;
+						}
+						else
+						{
+							result_is_valid = result.atlas_covers_target_area(section_count == 1 ? 99 : 90);
 						}
 
 						if (result_is_valid)
@@ -1910,7 +1928,7 @@ namespace rsx
 								if (const auto coverage_ratio = (coverage_size * 100ull) / memory_range.length();
 									coverage_ratio > max_overdraw_ratio)
 								{
-									rsx_log.error("[Performance warning] Texture gather routine encountered too many objects! Operation=%d, Mipmaps=%d, Depth=%d, Sections=%zu, Ratio=%llu%",
+									rsx_log.warning("[Performance warning] Texture gather routine encountered too many objects! Operation=%d, Mipmaps=%d, Depth=%d, Sections=%zu, Ratio=%llu%",
 										static_cast<int>(result.external_subresource_desc.op), attr.mipmaps, attr.depth, overlapping_fbos.size(), coverage_ratio);
 									m_rtts.check_for_duplicates(overlapping_fbos, memory_range);
 								}
@@ -2072,6 +2090,7 @@ namespace rsx
 			{
 			case rsx::texture_dimension_extended::texture_dimension_1d:
 				attributes.depth = 1;
+				attributes.height = 1;
 				attributes.slice_h = 1;
 				scale.height = scale.depth = 0.f;
 				subsurface_count = 1;
@@ -2099,6 +2118,15 @@ namespace rsx
 				break;
 			default:
 				fmt::throw_exception("Unsupported texture dimension %d", static_cast<int>(extended_dimension));
+			}
+
+			// Validation
+			if (!attributes.width || !attributes.height || !attributes.depth)
+			{
+				rsx_log.warning("Image at address 0x%x has invalid dimensions. Type=%d, Dims=%dx%dx%d",
+					attributes.address, static_cast<s32>(extended_dimension),
+					attributes.width, attributes.height, attributes.depth);
+				return {};
 			}
 
 			if (options.is_compressed_format)
@@ -2856,7 +2884,7 @@ namespace rsx
 
 					typeless_info.src_gcm_format = gcm_format;
 				}
-				else if (cached_src->is_depth_texture() != dst_is_depth_surface)
+				else
 				{
 					typeless_info.src_gcm_format = cached_src->get_gcm_format();
 				}

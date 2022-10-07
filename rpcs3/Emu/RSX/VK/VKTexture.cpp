@@ -41,7 +41,7 @@ namespace vk
 		}
 		else if (aspect & VK_IMAGE_ASPECT_DEPTH_BIT)
 		{
-			return base_size * 2;
+			return (base_size * 6) / 2;
 		}
 		else
 		{
@@ -303,7 +303,7 @@ namespace vk
 		{
 			if (src->format_class() == dst->format_class())
 			{
-				rsx_log.error("[Performance warning] Image copy requested incorrectly for matching formats.");
+				rsx_log.warning("[Performance warning] Image copy requested incorrectly for matching formats.");
 				copy_image(cmd, src, dst, src_rect, dst_rect, mipmaps, src_transfer_mask, dst_transfer_mask);
 				return;
 			}
@@ -417,7 +417,7 @@ namespace vk
 			src->format() != dst->format())
 		{
 			// Copying between two depth formats must match exactly or crashes will happen
-			rsx_log.error("[Performance warning] Image copy was requested incorrectly for mismatched depth formats");
+			rsx_log.warning("[Performance warning] Image copy was requested incorrectly for mismatched depth formats");
 			copy_image_typeless(cmd, src, dst, src_rect, dst_rect, mipmaps);
 			return;
 		}

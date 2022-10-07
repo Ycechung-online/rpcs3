@@ -22,10 +22,17 @@
 #pragma GCC diagnostic ignored "-Wredundant-decls"
 #pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
 #pragma GCC diagnostic ignored "-Weffc++"
-#ifndef __clang__
+#ifdef __clang__
+#pragma GCC diagnostic ignored "-Wdeprecated-anon-enum-enum-conversion"
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#else
 #pragma GCC diagnostic ignored "-Wduplicated-branches"
+#pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion"
 #endif
 #include <asmjit/asmjit.h>
+#if defined(ARCH_ARM64)
+#include <asmjit/a64.h>
+#endif
 #pragma GCC diagnostic pop
 #endif
 
@@ -35,6 +42,14 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+
+#if defined(ARCH_X64)
+using native_asm = asmjit::x86::Assembler;
+using native_args = std::array<asmjit::x86::Gp, 4>;
+#elif defined(ARCH_ARM64)
+using native_asm = asmjit::a64::Assembler;
+using native_args = std::array<asmjit::a64::Gp, 4>;
+#endif
 
 void jit_announce(uptr func, usz size, std::string_view name);
 
@@ -167,11 +182,91 @@ namespace asmjit
 		}
 	}
 
-	using imm_ptr = Imm;
+	inline void build_init_args_from_ghc(native_asm& c, native_args& args)
+	{
+#if defined(ARCH_X64)
+		// TODO: handle case when args don't overlap with r13/rbp/r12/rbx
+		c.mov(args[0], x86::r13);
+		c.mov(args[1], x86::rbp);
+		c.mov(args[2], x86::r12);
+		c.mov(args[3], x86::rbx);
+#else
+		static_cast<void>(c);
+		static_cast<void>(args);
+#endif
+	}
+
+	inline void build_init_ghc_args(native_asm& c, native_args& args)
+	{
+#if defined(ARCH_X64)
+		// TODO: handle case when args don't overlap with r13/rbp/r12/rbx
+		c.mov(x86::r13, args[0]);
+		c.mov(x86::rbp, args[1]);
+		c.mov(x86::r12, args[2]);
+		c.mov(x86::rbx, args[3]);
+#else
+		static_cast<void>(c);
+		static_cast<void>(args);
+#endif
+	}
+
+#if defined(ARCH_X64)
+	template <uint Size>
+	struct native_vec;
+
+	template <>
+	struct native_vec<16> { using type = x86::Xmm; };
+
+	template <>
+	struct native_vec<32> { using type = x86::Ymm; };
+
+	template <>
+	struct native_vec<64> { using type = x86::Zmm; };
+
+	template <uint Size>
+	using native_vec_t = typename native_vec<Size>::type;
+
+	// if (count > step) { for (; ctr < (count - step); ctr += step) {...} count -= ctr; }
+	inline void build_incomplete_loop(native_asm& c, auto ctr, auto count, u32 step, auto&& build)
+	{
+		asmjit::Label body = c.newLabel();
+		asmjit::Label exit = c.newLabel();
+
+		ensure((step & (step - 1)) == 0);
+		c.cmp(count, step);
+		c.jbe(exit);
+		c.sub(count, step);
+		c.align(asmjit::AlignMode::kCode, 16);
+		c.bind(body);
+		build();
+		c.add(ctr, step);
+		c.sub(count, step);
+		c.ja(body);
+		c.add(count, step);
+		c.bind(exit);
+	}
+
+	// for (; count > 0; ctr++, count--)
+	inline void build_loop(native_asm& c, auto ctr, auto count, auto&& build)
+	{
+		asmjit::Label body = c.newLabel();
+		asmjit::Label exit = c.newLabel();
+
+		c.test(count, count);
+		c.jz(exit);
+		c.align(asmjit::AlignMode::kCode, 16);
+		c.bind(body);
+		build();
+		c.inc(ctr);
+		c.sub(count, 1);
+		c.ja(body);
+		c.bind(exit);
+	}
+#endif
 }
 
 // Build runtime function with asmjit::X86Assembler
-template <typename FT, typename F>
+template <typename FT, typename Asm = native_asm, typename F>
 inline FT build_function_asm(std::string_view name, F&& builder)
 {
 	using namespace asmjit;
@@ -181,7 +276,8 @@ inline FT build_function_asm(std::string_view name, F&& builder)
 	CodeHolder code;
 	code.init(rt.environment());
 
-	std::array<x86::Gp, 4> args;
+#if defined(ARCH_X64)
+	native_args args;
 #ifdef _WIN32
 	args[0] = x86::rcx;
 	args[1] = x86::rdx;
@@ -193,95 +289,30 @@ inline FT build_function_asm(std::string_view name, F&& builder)
 	args[2] = x86::rdx;
 	args[3] = x86::rcx;
 #endif
+#elif defined(ARCH_ARM64)
+	native_args args;
+	args[0] = a64::x0;
+	args[1] = a64::x1;
+	args[2] = a64::x2;
+	args[3] = a64::x3;
+#endif
 
-	x86::Assembler compiler(&code);
+	Asm compiler(&code);
 	compiler.addEncodingOptions(EncodingOptions::kOptimizedAlign);
-	builder(std::ref(compiler), args);
+	if constexpr (std::is_invocable_r_v<bool, F, Asm&, native_args&>)
+	{
+		if (!builder(compiler, args))
+			return nullptr;
+	}
+	else
+	{
+		builder(compiler, args);
+	}
+
 	const auto result = rt._add(&code);
 	jit_announce(result, code.codeSize(), name);
 	return reinterpret_cast<FT>(uptr(result));
 }
-
-#ifdef __APPLE__
-template <typename FT, usz = 4096>
-class built_function
-{
-	FT m_func;
-
-public:
-	built_function(const built_function&) = delete;
-
-	built_function& operator=(const built_function&) = delete;
-
-	template <typename F>
-	built_function(std::string_view name, F&& builder)
-		: m_func(ensure(build_function_asm<FT>(name, std::forward<F>(builder))))
-	{
-	}
-
-	operator FT() const noexcept
-	{
-		return m_func;
-	}
-
-	template <typename... Args>
-	auto operator()(Args&&... args) const noexcept
-	{
-		return m_func(std::forward<Args>(args)...);
-	}
-};
-#else
-template <typename FT, usz Size = 4096>
-class built_function
-{
-	alignas(4096) uchar m_data[Size];
-
-public:
-	built_function(const built_function&) = delete;
-
-	built_function& operator=(const built_function&) = delete;
-
-	template <typename F>
-	built_function(std::string_view name, F&& builder)
-	{
-		using namespace asmjit;
-
-		inline_runtime rt(m_data, Size);
-
-		CodeHolder code;
-		code.init(rt.environment());
-
-		std::array<x86::Gp, 4> args;
-	#ifdef _WIN32
-		args[0] = x86::rcx;
-		args[1] = x86::rdx;
-		args[2] = x86::r8;
-		args[3] = x86::r9;
-	#else
-		args[0] = x86::rdi;
-		args[1] = x86::rsi;
-		args[2] = x86::rdx;
-		args[3] = x86::rcx;
-	#endif
-
-		x86::Assembler compiler(&code);
-		compiler.addEncodingOptions(EncodingOptions::kOptimizedAlign);
-		builder(std::ref(compiler), args);
-		jit_announce(rt._add(&code), code.codeSize(), name);
-	}
-
-	operator FT() const noexcept
-	{
-		return FT(+m_data);
-	}
-
-	template <typename... Args>
-	auto operator()(Args&&... args) const noexcept
-	{
-		return FT(+m_data)(std::forward<Args>(args)...);
-	}
-};
-#endif
 
 #ifdef LLVM_AVAILABLE
 

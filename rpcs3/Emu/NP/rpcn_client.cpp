@@ -21,6 +21,10 @@
 #include <winsock2.h>
 #include <WS2tcpip.h>
 #else
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#endif
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -32,6 +36,9 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <netdb.h>
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
 #endif
 
 LOG_CHANNEL(rpcn_log, "rpcn");
@@ -42,7 +49,7 @@ std::vector<std::vector<u8>> get_rpcn_msgs();
 
 namespace rpcn
 {
-	constexpr u32 RPCN_PROTOCOL_VERSION = 14;
+	constexpr u32 RPCN_PROTOCOL_VERSION = 15;
 	constexpr usz RPCN_HEADER_SIZE      = 13;
 	constexpr usz COMMUNICATION_ID_SIZE = 9;
 
@@ -1583,11 +1590,14 @@ namespace rpcn
 		return true;
 	}
 
-	bool rpcn_client::req_ticket(u32 req_id, const std::string& service_id)
+	bool rpcn_client::req_ticket(u32 req_id, const std::string& service_id, const std::vector<u8>& cookie)
 	{
 		std::vector<u8> data;
 		std::copy(service_id.begin(), service_id.end(), std::back_inserter(data));
 		data.push_back(0);
+		const le_t<u32> size = cookie.size();
+		std::copy(reinterpret_cast<const u8 *>(&size), reinterpret_cast<const u8 *>(&size) + sizeof(le_t<u32>), std::back_inserter(data));
+		std::copy(cookie.begin(), cookie.end(), std::back_inserter(data));
 
 		if (!forge_send(CommandType::RequestTicket, req_id, data))
 			return false;

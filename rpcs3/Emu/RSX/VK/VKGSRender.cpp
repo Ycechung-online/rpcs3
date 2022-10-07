@@ -603,6 +603,11 @@ VKGSRender::VKGSRender() : GSRender()
 			}
 			break;
 #endif
+		case vk::driver_vendor::MVK:
+			// Async compute crashes immediately on Apple GPUs
+			rsx_log.error("Apple GPUs are incompatible with the current implementation of asynchronous texture decoding.");
+			backend_config.supports_asynchronous_compute = false;
+			break;
 		default: break;
 		}
 
@@ -1308,10 +1313,17 @@ void VKGSRender::clear_surface(u32 mask)
 				colormask = 0;
 				break;
 			}
+			case rsx::surface_color_format::b8:
+			{
+				rsx::get_b8_clear_color(clear_r, clear_g, clear_b, clear_a);
+				colormask = rsx::get_b8_clearmask(colormask);
+				use_fast_clear = (colormask == RSX_GCM_CLEAR_RED_BIT);
+				break;
+			}
 			case rsx::surface_color_format::g8b8:
 			{
 				rsx::get_g8b8_clear_color(clear_r, clear_g, clear_b, clear_a);
-				colormask = rsx::get_g8b8_r8g8_colormask(colormask);
+				colormask = rsx::get_g8b8_r8g8_clearmask(colormask);
 				use_fast_clear = (colormask == (RSX_GCM_CLEAR_RED_BIT | RSX_GCM_CLEAR_GREEN_BIT));
 				break;
 			}
@@ -1320,7 +1332,7 @@ void VKGSRender::clear_surface(u32 mask)
 			case rsx::surface_color_format::x8b8g8r8_z8b8g8r8:
 			{
 				rsx::get_abgr8_clear_color(clear_r, clear_g, clear_b, clear_a);
-				colormask = rsx::get_abgr8_colormask(colormask);
+				colormask = rsx::get_abgr8_clearmask(colormask);
 				[[fallthrough]];
 			}
 			default:
@@ -1646,8 +1658,17 @@ bool VKGSRender::load_program()
 		bool color_mask_r = rsx::method_registers.color_mask_r(index);
 		bool color_mask_a = rsx::method_registers.color_mask_a(index);
 
-		if (rsx::method_registers.surface_color() == rsx::surface_color_format::g8b8)
+		switch (rsx::method_registers.surface_color())
+		{
+		case rsx::surface_color_format::b8:
+			rsx::get_b8_colormask(color_mask_r, color_mask_g, color_mask_b, color_mask_a);
+			break;
+		case rsx::surface_color_format::g8b8:
 			rsx::get_g8b8_r8g8_colormask(color_mask_r, color_mask_g, color_mask_b, color_mask_a);
+			break;
+		default:
+			break;
+		}
 
 		properties.state.set_color_mask(index, color_mask_r, color_mask_g, color_mask_b, color_mask_a);
 	}
@@ -1737,14 +1758,10 @@ bool VKGSRender::load_program()
 			rsx::method_registers.msaa_alpha_to_coverage_enabled(),
 			alpha_to_one_enable);
 
-		if (const auto chip_family = vk::get_chip_family();
-			chip_family == vk::chip_class::AMD_navi1x ||
-			chip_family == vk::chip_class::AMD_navi2x)
-		{
-			// NAVI family has a GPU bug with MSAA where shading rate is not correctly initialized if left disabled
-			// Manually initialize it and set it to spec default (full shading)
-			properties.state.set_multisample_shading_rate(1.f);
-		}
+		// A problem observed on multiple GPUs is that interior geometry edges can resolve 0 samples unless we force shading rate of 1.
+		// For whatever reason, the way MSAA images are 'resolved' on PS3 bypasses this issue.
+		// NOTE: We do not do image resolve at all, the output is merely 'exploded' and the guest application is responsible for doing the resolve in software as it is on real hardware.
+		properties.state.set_multisample_shading_rate(1.f);
 	}
 
 	properties.renderpass_key = m_current_renderpass_key;
@@ -2456,7 +2473,7 @@ void VKGSRender::get_occlusion_query_result(rsx::reports::occlusion_query_info* 
 				m_flush_requests.clear_pending_flag();
 			}
 
-			rsx_log.error("[Performance warning] Unexpected ZCULL read caused a hard sync");
+			rsx_log.warning("[Performance warning] Unexpected ZCULL read caused a hard sync");
 			busy_wait();
 		}
 

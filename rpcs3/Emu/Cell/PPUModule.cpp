@@ -30,7 +30,7 @@ LOG_CHANNEL(ppu_loader);
 extern std::string ppu_get_function_name(const std::string& _module, u32 fnid);
 extern std::string ppu_get_variable_name(const std::string& _module, u32 vnid);
 extern void ppu_register_range(u32 addr, u32 size);
-extern void ppu_register_function_at(u32 addr, u32 size, ppu_function_t ptr);
+extern void ppu_register_function_at(u32 addr, u32 size, ppu_intrp_func_t ptr);
 
 extern void sys_initialize_tls(ppu_thread&, u64, u32, u32, u32);
 
@@ -275,7 +275,7 @@ static void ppu_initialize_modules(ppu_linkage_info* link)
 	};
 
 	// Initialize double-purpose fake OPD array for HLE functions
-	const auto& hle_funcs = ppu_function_manager::get(g_cfg.core.ppu_decoder == ppu_decoder_type::llvm);
+	const auto& hle_funcs = ppu_function_manager::get(g_cfg.core.ppu_decoder != ppu_decoder_type::_static);
 
 	u32& hle_funcs_addr = g_fxo->get<ppu_function_manager>().addr;
 
@@ -859,9 +859,9 @@ static void ppu_check_patch_spu_images(const ppu_segment& seg)
 
 		if (g_cfg.core.spu_debug)
 		{
-			fs::pending_file temp(fs::get_cache_dir() + "/spu_progs/" + vfs::escape(name.substr(name.find_last_of('/') + 1)) + '_' + hash.substr(4) + ".elf");
+			fs::file temp(fs::get_cache_dir() + "/spu_progs/" + vfs::escape(name.substr(name.find_last_of('/') + 1)) + '_' + hash.substr(4) + ".elf", fs::rewrite);
 
-			if (!temp.file || !(temp.file.write(obj.save()), temp.commit()))
+			if (!temp || !temp.write(obj.save()))
 			{
 				ppu_loader.error("Failed to dump SPU program from PPU executable: name='%s', hash=%s", name, hash);
 			}
