@@ -13,7 +13,7 @@ if [ "$DEPLOY_APPIMAGE" = "true" ]; then
     ls ./appdir/usr/lib/
     rm -r ./appdir/usr/share/doc
     cp "$(readlink -f /lib/x86_64-linux-gnu/libnsl.so.1)" ./appdir/usr/lib/libnsl.so.1
-    export PATH=/rpcs3/build/squashfs-root/usr/bin/:${PATH}
+    export PATH=/rpcs3/build/squashfs-root/usr/bin/:"${PATH}"
 
     # Embed newer libstdc++ for distros that don't come with it (ubuntu 16.04)
     mkdir -p appdir/usr/optional/ ; mkdir -p appdir/usr/optional/libstdc++/
@@ -42,7 +42,7 @@ if [ "$DEPLOY_APPIMAGE" = "true" ]; then
     
     ls
 
-    COMM_TAG="$(grep 'version{.*}' ../rpcs3/rpcs3_version.cpp | awk -F[\{,] '{printf "%d.%d.%d", $2, $3, $4}')"
+    COMM_TAG=$(awk '/version{.*}/ { printf("%d.%d.%d", $5, $6, $7) }' ../rpcs3/rpcs3_version.cpp)
     COMM_COUNT="$(git rev-list --count HEAD)"
     COMM_HASH="$(git rev-parse --short=8 HEAD)"
     RPCS3_APPIMAGE="rpcs3-v${COMM_TAG}-${COMM_COUNT}-${COMM_HASH}_linux64.AppImage"
